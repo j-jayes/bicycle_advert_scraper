@@ -1,0 +1,760 @@
+---
+title: "ACSE Essay"
+author: "JJayes"
+date: "28/09/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning=FALSE)
+
+rm(list = ls())
+
+library(pacman)
+
+p_load(tidyverse, lubridate, glue, kableExtra)
+
+theme_set(theme_light())
+
+```
+
+# Proposal for Advanced Cross Section Econometrics Essay
+
+## Purpose of study and TLDR
+
+I propose to do some duration modeling and prediction for the length of time adverts for second hand bicycles are posted on Bikehub, an online bicycle marketplace. 
+
+Some covariates of interest include the type of bike, location of poster, asking price, discount-over-time (as many posters discount their bikes as the ad remains on the platform longer), and proxies for the quality of the advert in the form of the number of pictures posted and the length of the description. Further covariates of interest include the type of seller (business/dealer or private) and the number of ads posted by each seller.
+
+Some of these vary over time, most importantly asking price, which will allow an interesting analysis of the duration of the advert and the seller's discounting behaviour. 
+
+In the remainder of this document I provide some context, a description of the data, some descriptive graphs, and some Kaplan Meier survival curves.
+
+
+
+
+## Proposed Methods
+
+I propose to start with some descriptive analysis, use Kaplan Meier survival curves, as well as a variety of duration models including one using the Weibull distribution (allowing for monotonically increasing or decreasing hazard functions) and the log-logistic distribution (which allows non-monotonic hazard functions).
+
+## Context
+
+The second hand bicycle market in South Africa is established and active. 
+
+In addition to adverts on notice boards, and physical stores which sell second hand bikes, there are multiple online platforms that host adverts for bicycles. One such is Bikehub.co.za
+
+[Bike Hub](https://bikehub.co.za/ "Bike Hub homepage") is a news and content site that covers the cycling industry in South Africa and also hosts classified ads. The ads are free to post for private sellers but can be given more views through payment for a spot as a 'featured ad'. In addition, second hand stores and dealers must pay a posting fee to the site. 
+
+Bike Hub separates ads into multiple categories, including "dual suspension mountain bikes, hardtail mountain bikes, road bikes, triathlon bikes, kids bikes, fat bikes", etc.
+
+The adverts contain information about the bicycle, the poster's location, the asking price, and photographs of the bicycle. There is also seller specific information including how many ads the poster has listed currently and ads posted ever.
+
+The adverts expire after 30 days, but can be renewed for a further 30 if the bicycle has not sold. After 60 days the poster must make a new advert.
+
+## Data
+
+The data I propose to use is a set of web scraped information from more than 2500 adverts posted on the site between from the 21st of August until the present. By scraping the site each day, I can ascertain how long the ad is up on the site before it is removed. 
+
+Removal is indicative of either a sale, an ad expiration (at 30 and then 60 days), or perhaps the seller changing their mind about parting with the bicycle. As such, there is censoring from the right hand side. Luckily, the adverts list the date they were originally posted, so censoring from the left is less of a concern.
+
+## Basic decsriptivess
+
+I include below some basic descriptives to show what the data looks like and examine some patters that exist. Further, I plot some Kaplan Meier curves as part of the exploratory analysis.
+
+
+
+```{r reading in data}
+myfiles <- list.files(path = "data", pattern = "*.rds", full.names = T)
+
+bike_hub <- myfiles[5:65]
+
+gumtree <- myfiles[66:186]
+
+df_bike_hub <- map_df(gumtree, read_rds) %>% 
+  mutate(n_views = 0,
+         # seller_age = parse_date(seller_age),
+         site = "gumtree")
+
+df <- df_bike_hub
+
+df %>% 
+  summarise(min(ad_date, na.rm = T))
+
+df %>% 
+  summarise(max(ad_date, na.rm = T))
+
+write_rds(df_bike_hub, "data/Gumtree_27_01_2021.rds")
+
+```
+
+
+```{r}
+# df %>% 
+#   ggplot(aes(ad_date)) +
+#   geom_density()
+
+df <- df %>% 
+  mutate(ad_date = str_replace(ad_date, "2019", "2020"))
+
+df <- df %>% 
+  mutate(ad_date = floor_date(ymd_hms(ad_date), unit = "day"),
+         scrape_time =  floor_date(ymd_hms(scrape_time), unit = "day"))
+
+
+df <- df %>% 
+  group_by(ad_url) %>% 
+  mutate(first_date = min(ad_date),
+         last_date = max(scrape_time),
+         ad_duration = as.duration(last_date - first_date),
+         ad_duration_days = as.numeric(ad_duration, "days"),
+         max_price = max(price),
+         min_price = min(price),
+         n_prices = n_distinct(price)) %>% 
+  ungroup() %>% 
+  mutate(title = str_to_lower(title),
+         text = str_to_lower(str_squish(text))) %>% 
+  select(-n_views)
+```
+
+### Feature engineering
+
+```{r}
+# business user and number of reviews
+
+df <- df %>% 
+  mutate(seller_reviews = parse_number(str_extract(seller_name, "\\(.*\\)"))) %>% 
+  mutate(seller_reviews = ifelse(is.na(seller_reviews), 0, seller_reviews))
+
+
+df <- df %>% 
+  mutate(business_user = str_detect(seller_name, "business user")) %>% 
+  mutate(business_user = as.factor(business_user))
+
+df %>% 
+  ggplot(aes(n_all_time_ads, fill = business_user)) +
+  geom_histogram() +
+  scale_x_log10()
+```
+
+
+```{r}
+# price differential
+df <- df %>% 
+  mutate(price_diff = (max_price-min_price)/max_price)
+
+df %>%
+  ggplot(aes(ad_duration_days, price_diff)) +
+  geom_jitter(alpha = .5) +
+  geom_smooth()
+
+df %>% 
+  mutate(expired = ifelse(ad_duration_days %in% c(28,29,30), 1, 0),
+         expired = as.factor(expired)) %>% 
+  ggplot(aes(price_diff, fill = expired)) +
+  geom_histogram() +
+  facet_wrap(~ expired)
+
+
+```
+
+```{r}
+# number of characters in description and title
+df <- df %>% 
+  mutate(title_and_text = str_c(title, text),
+         n_text = nchar(title_and_text))
+
+
+df %>% 
+  filter(!is.na(business_user)) %>% 
+  ggplot(aes(n_text, fill = business_user)) +
+  geom_density() +
+  facet_wrap(~ business_user, nrow = 2)
+
+```
+
+
+```{r}
+library(tidytext)
+p_load(widyr)
+```
+
+#### Common words
+
+```{r}
+text_words <- df %>%
+  select(title_and_text) %>% 
+  unnest_tokens(word, title_and_text) %>% 
+  anti_join(stop_words)
+
+text_words %>% 
+  count(word, sort = T)
+
+text_words_3000 <- text_words %>% 
+  count(word, sort = T) %>% 
+  filter(n > 3000) %>% 
+  select(word)
+
+text_words_3000_test <- text_words_3000 %>% 
+  str_c(word, sep = ", ")
+
+# common words
+df$words <- str_extract_all(df$title_and_text, paste(text_words_3000, collapse = "|")) %>% 
+  sapply(., paste, collapse = ", ")
+
+```
+
+Maybe 3000 uses is a good cut off.
+
+```{r}
+brand_words <- df %>% 
+  select(ad_url, title) %>% 
+  unnest_tokens(word, title) 
+  
+brand_words_count <- brand_words %>% 
+  count(word, sort = T)
+
+brands <- c("giant",
+            "specialized",
+            "scott",
+            "trek",
+            "raleigh",
+            "avalanche",
+            "merida",
+            "cannondale",
+            "titan",
+            "silverback",
+            "vintage",
+            "s-works",
+            "sworks",
+            "mongoose",
+            "gt",
+            "bianchi",
+            "schwinn",
+            "momsen",
+            "totem",
+            "pinarello",
+            "cervelo",
+            "liv",
+            "santa cruz",
+            "fuji",
+            "felt",
+            "ktm",
+            "hanson",
+            "hansom",
+            "alpina",
+            "surge",
+            "colnago",
+            "orbea",
+            "pyga",
+            "rook",
+            "peugeot",
+            "diamondback")
+
+models <- c("spark",
+            "epic",
+            "tcr",
+            "tarmac",
+            "comp",
+            "team",
+            "advanced",
+            "anthem",
+            "scalpel",
+            "emonda",
+            "race",
+            "tandem",
+            "elite",
+            "cruiser",
+            "roubaix",
+            "gravel",
+            "speedster",
+            "scale",
+            "scultura",
+            "stumpjumper",
+            "fuel",
+            "ebike",
+            "contessa",
+            "rc6000",
+            "rc2000",
+            "rc3000",
+            "xtc",
+            "dogma",
+            "fixie",
+            "sola",
+            "racer",
+            "revel",
+            "shiv",
+            "supersix",
+            "super",
+            "talon",
+            "rockhopper",
+            "caad",
+            "fastback",
+            "lefty",
+            "foil",
+            "domane",
+            "camber",
+            "tcx",
+            "venge",
+            "vipa")
+
+material <- c("carbon",
+              "aluminium")
+
+# naming brands
+df$brand <- str_extract_all(df$title, paste(brands, collapse = "|")) %>% 
+  sapply(., paste, collapse = ", ")
+# naming models
+df$model <- str_extract_all(df$title, paste(models, collapse = "|")) %>% 
+  sapply(., paste, collapse = ", ")
+
+
+df <- df %>% 
+  mutate(brand = if_else(nchar(brand) == 0, "missing", brand),
+         brand = factor(brand),
+         model = if_else(nchar(model) == 0, "missing", model),
+         model = factor(model))
+# naming model
+df <- df %>% 
+  mutate(model = if_else(model != "missing", glue("{brand} {model}"), "missing"),
+         model = factor(model))
+
+df <- df %>% 
+  relocate(link:ad_url, .after = ad_duration) %>% 
+  relocate(brand:model, .after = text)
+
+```
+
+
+### Geocoding
+
+```{r}
+
+locations <- df %>% 
+  select(location) %>% 
+  distinct()
+
+p_load(tidygeocoder)
+
+geo_code <- locations %>%
+  geocode(address = location, method = "cascade")
+
+# check for errors
+geo_code %>% 
+  ggplot(aes(long, lat)) +
+  geom_point()
+
+# remove too specific place names
+geo_code_errors <- geo_code %>% 
+  filter(is.na(lat)) %>% 
+  mutate(location_error = gsub("(.*)\\,.*","\\1", location))
+
+# change commerical seller in Midrand
+geo_code_errors <- geo_code_errors %>% 
+  mutate(location_error = ifelse(str_detect(location_error, "Login Required"), "Gauteng, Midrand", location_error)) %>% 
+  select(location, location_error)
+
+# fix errors
+geo_code_corrections <- geo_code_errors %>%
+  geocode(address = location_error, method = "cascade")
+
+# prep for joining
+geo_code_corrections_to_combine <- geo_code_corrections %>% 
+  select(!location_error)
+
+# fix other far away places
+geo_code_errors_2 <- geo_code %>% 
+  filter(lat > -20) %>% select(location) %>% 
+  mutate(location = str_c("South Africa, ", location)) %>% 
+  mutate(location_error = ifelse(str_count(location, "\\,") > 2, gsub("(.*)\\,.*","\\1", location), location))
+
+# fix more errors
+geo_code_corrections_2 <- geo_code_errors_2 %>%
+  geocode(address = location_error, method = "cascade")
+
+geo_code_corrections_2 <- geo_code_corrections_2 %>% 
+  select(-location_error)
+
+geo_code_to_combine <- geo_code %>% 
+  filter(!is.na(lat)) %>% 
+  rbind(geo_code_corrections_to_combine)
+
+geo_code_to_combine %>% 
+  ggplot(aes(long, lat)) +
+  geom_point()
+
+geo_code_to_combine <- geo_code_to_combine %>% 
+  filter(lat <= -10) %>% 
+  rbind(geo_code_corrections_2)
+
+df <- df %>% 
+  full_join(geo_code_to_combine)
+
+
+df %>% 
+  ggplot(aes(long, lat)) +
+  geom_point()
+
+write_rds(df, file = "clean_data/27_01_2021.rds")
+
+```
+
+
+A snapshot of the dataset is shown below for 10 entries. The brand and model are coded from the most popular bicycles on the site and are thus missing for a number of observations.
+
+```{r}
+# # map <- read_rds("map/gadm36_ZAF_1_sp.rds")
+# map <- read_rds("map/gadm36_ZAF_2_sf.rds")
+# 
+# 
+# summary(map)
+# 
+# map$data
+# 
+# shapefile_df <- fortify(map)
+# 
+# # Now the shapefile can be plotted as either a geom_path or a geom_polygon.
+# # Paths handle clipping better. Polygons can be filled.
+# # You need the aesthetics long, lat, and group.
+# map <- ggplot() +
+#   geom_path(data = shapefile_df, 
+#           aes(x = long, y = lat, group = group),
+#           color = 'gray', fill = 'white', size = .2) +
+#   coord_map()
+# 
+# ggplot(aes())
+
+df %>% 
+  filter(!is.na(first_date)) %>% 
+  head(10) %>% 
+  knitr::kable(., format = "html", caption = "Snippet of dataset") %>% kable_styling(font_size = 9)
+
+# write_rds(df, file = "data/Bike_hub_01-01-2021.rds")
+
+```
+
+## Exploratory analysis
+
+Geographically, the largest number of adverts are posted in the Western Cape, followed by Gauteng and KwaZulu-Natal. There are currently 2,576 distinct adverts.
+
+```{r}
+df %>% 
+  distinct(ad_url, .keep_all = T) %>% filter(!is.na(ad_date))
+  filter(price > 500,
+         nchar(province) > 0) %>% 
+  group_by(province) %>% 
+  summarise(n = n()) %>% 
+  ungroup() %>% 
+  mutate(province = fct_reorder(province, n)) %>% 
+  ggplot(aes(n, province, fill = province)) +
+  geom_col() +
+  scale_fill_brewer(type = "div", name = "Province") +
+  theme(legend.position = "none") +
+  labs(title = "Number of adverts by province",
+       y = "",
+       x = "Number of adverts")
+
+```
+
+### Duration of adverts
+
+The density of duration of adverts for the three largest categories of bicycles are show in the plot below, by the four largest provinces.
+
+It is indicative that mountain bikes sell more quickly than road bikes and 'other' bikes, with the majority of the density before 30 days. Gauteng appears to have steep peaks at low duration, potentially indicating quicker sales than other provinces.
+
+```{r}
+
+df %>% 
+  filter(between(price, 500, 100000)) %>% 
+  mutate(type = fct_lump(type, 3),
+         province = fct_lump(province, 4)) %>% 
+  ggplot(aes(ad_duration_days, fill = province)) +
+  geom_density(alpha = .5) +
+  geom_vline(xintercept = 30, lty = 2) +
+  scale_fill_viridis_d(name = "Province") +
+  facet_wrap( ~ type) +
+  labs(x = "Ad duration (days)",
+       y = "Density",
+       title = "Density plot of price distribution",
+       subtitle = "By bike type and province",
+       caption = "Provinces are lumped into 4 and other as the majority of adverts are posted in WC, GP, KZN")
+
+```
+
+In the plot below I show the relationship between price and duration of advert, with linear fit lines shown in colour. This indicates that on the whole, more expensive bicycles take longer to sell. It may be interesting to estimate models for bikes sold at different price points, particularly for the 'other' bikes category as the majority are sold at lower prices than the largest three categories.
+
+```{r}
+
+df %>% 
+  filter(between(price, 500, 100000)) %>% 
+  mutate(type = fct_lump(type, 3)) %>% 
+  ggplot(aes(price, ad_duration_days, colour = type)) +
+  geom_point(alpha = .1) +
+  geom_smooth(method = "lm") +
+  facet_wrap( ~ type) +
+  scale_x_continuous(label = scales::unit_format(unit = "R")) +
+  geom_hline(yintercept = 30, lty = 2) +
+  theme(legend.position = "none") +
+  labs(y = "Ad duration (days)",
+       x = "Price",
+       title = "Dot plot of price and ad duration",
+       subtitle = "By bike type",
+       caption = "Note: linear fit indicated by coloured lines")
+
+```
+
+
+### What is the relationship between price changes and duration?
+
+The dots in the plot below indicate the extent to which sellers discounted their asking price against the duration that the advert was up for. Again I plot a dotted line at 30 days to indicate the first advert expiry point.
+
+There is not convincing evidence that there is duration dependence in discounting, though there are many adverts which do discount their bikes after some time.
+
+```{r}
+
+df %>% 
+  mutate(price_differential = 1- (max_price - min_price) / max_price,
+         type = fct_lump(type, 3)) %>% 
+  filter(#price_differential != 1,
+         price_differential > .5,
+         ad_duration_days <= 60) %>% 
+  ggplot(aes(ad_duration_days, price_differential, colour = type)) +
+  geom_point(alpha = .1) +
+  geom_smooth(method = "loess") +
+  geom_vline(xintercept = 30, lty = 2) +
+  facet_wrap(~ type) +
+  theme(legend.position = "none") +
+  labs(y = "Price discount",
+       x = "Ad duration (days)",
+       title = "Dot plot of price discount and ad duration",
+       subtitle = "By bike type",
+       caption = "Note: linear fit indicated by coloured lines")
+  
+```
+
+The mean number of pries asked ranges between 1.19 and 1.3, indicating that sellers do frequently change their asking prices. Further, for all sellers (not only those who do discount), the mean discount ranges between 2.29 and 3.69 percent.
+
+```{r}
+df %>%
+  mutate(price_differential = 1- (max_price - min_price) / max_price,
+         type = fct_lump(type, 3)) %>% 
+  filter(!is.na(price_differential)) %>% 
+  group_by(type) %>% 
+  summarise(mean_number_prices = mean(n_prices), mean_discount_pcts = 100*(1- mean(price_differential))) %>% 
+  ungroup()
+```
+
+
+## Survival graphs
+
+Below I plot some Kaplan Meier survival curves. 
+
+```{r}
+p_load(survival, ranger, ggfortify)
+
+df_surv <- df %>% 
+  mutate(status = ifelse(ad_duration_days %in% c(29, 30), 0, 1),
+         n_characters = nchar(text),
+         price_differential = 1- (max_price - min_price) / max_price) %>% 
+  filter(!is.na(ad_duration_days))
+
+# df_surv %>% 
+#   count(status, sort = T)
+
+
+km <- with(df_surv, Surv(ad_duration_days, status))
+# head(km,80)
+
+km_fit <- survfit(Surv(ad_duration_days, status) ~ 1, data=df_surv)
+# summary(km_fit, times = c(1,30,60,90*(1:10)))
+
+# excluded for now
+# autoplot(km_fit)
+
+```
+
+### By type of bicycle
+
+This plot indicates that hard-tail mountain bikes sell the fastest, followed by dual-suspension mountain bikes, and then road bikes and other bikes.
+
+In the density plot by price below the KM curves it is evident that hard-tail mountain bikes have a lower median price than road bikes and dual suspension mountain bikes.
+
+```{r}
+df_surv <- df_surv %>% 
+  mutate(type = fct_lump(type, 3))
+
+km_trt_fit <- survfit(Surv(ad_duration_days, status) ~ type, data=df_surv)
+
+autoplot(km_trt_fit)
+
+df_medians <- df_surv %>% 
+  group_by(type) %>% 
+  summarise(median = median(price))
+
+df_surv %>% 
+  mutate(type = fct_reorder(type, price)) %>% 
+  ggplot(aes(price, fill = type)) +
+  geom_density(alpha = .5) +
+  geom_vline(data = df_medians, aes(xintercept = median), lty = 2)+
+  scale_x_continuous(label = scales::unit_format(unit = "R")) +
+  theme(legend.position = "none") +
+  facet_wrap(~ type, ncol = 1) +
+  labs(y = "Density",
+       x = "Price",
+       title = "Density plot of price",
+       subtitle = "By bike type",
+       caption = "Note: dotted line indicates median price")
+  
+
+```
+
+### By province
+
+```{r}
+df_surv <- df_surv %>% 
+  mutate(province = fct_lump(province, 3))
+
+km_trt_fit_prov <- survfit(Surv(ad_duration_days, status) ~ province, data=df_surv)
+autoplot(km_trt_fit_prov)
+
+```
+
+In this plot I have lumped the provinces into 4 categories, the largest three markets by the number of adverts, and an 'other' category.
+
+The results also make intuitive sense. The largest three markets have faster sales than the 'other' provinces, as their survival curves are lower.
+
+### Impact of covariates
+
+```{r}
+aa_fit <-aareg(Surv(ad_duration_days, status) ~ type +
+                 price + price_differential + n_photos + n_characters, 
+                 data = df_surv)
+# aa_fit
+
+autoplot(aa_fit)
+
+```
+
+In this final plot, I show how the covariates of interest change in importance over the period. I still need some time to interpret these.
+
+
+# Regression trees
+
+```{r}
+p_load(tidymodels)
+
+df_tree <- df %>% 
+  distinct(ad_url, .keep_all = T) %>% 
+  mutate(type = fct_lump(type, 4)) %>% 
+  filter_at(vars(price, brand, model, n_photos, n_all_time_ads, province, ad_duration_days, n_prices),all_vars(!is.na(.))) 
+
+df_tree <- df_tree %>% 
+  filter(type != "Other") %>% 
+  mutate(type = factor(as.character(type)))
+
+df_tree_folds <- df_tree %>% 
+  bootstraps()
+
+df_tree_folds
+```
+
+
+```{r}
+
+rf_spec <- rand_forest(trees = 1000) %>% 
+  set_mode("classification") %>% 
+  set_engine("ranger")
+
+df_workflow <- workflow() %>% 
+  add_model(rf_spec) %>% 
+  add_formula(type ~ price + brand + model + n_photos + n_all_time_ads + province + ad_duration_days + n_prices)
+
+
+df_rs <- fit_resamples(
+  df_workflow,
+  resamples = df_tree_folds,
+  control = control_resamples(save_pred = T)
+)
+
+```
+
+### Collect metrics
+
+```{r}
+
+collect_metrics(df_rs)
+
+```
+
+### Collect predictions
+
+```{r}
+df_rs %>% 
+  collect_predictions() %>% 
+  group_by(id) %>% 
+  ppv(type, .pred_class)
+
+```
+
+### ROC AUC curves
+
+```{r}
+df_rs %>% 
+  collect_predictions() %>%
+  group_by(id) %>% 
+  roc_curve(type, `.pred_dual suspension bikes`:.pred_Other) %>% 
+  autoplot()
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Ensemble model
+
+```{r}
+p_load(stacks)
+
+df %>% skimr::skim()
+```
+
+
+## Test and train sets
+
+```{r}
+set.seed(2021)
+
+tidy_split <- 
+
+```
+
+
