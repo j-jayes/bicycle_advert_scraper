@@ -212,11 +212,3 @@ ads <- ads %>%
 
 st <- format(Sys.time(), "%Y-%m-%d-%I-%M-%p")
 write_rds(ads, paste0("data/ads/bike_hub_", st, ".rds"))
-
-
-
-
-
-
-
-

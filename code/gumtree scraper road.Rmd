@@ -112,7 +112,7 @@ list_of_links_clean <- list_of_links %>%
 
 # save list of links
 st <- format(Sys.time(), "%Y-%m-%d-%I-%M-%p")
-write.csv(list_of_links_clean, file = paste("data/gumtree_links_mountain",st, ".csv", sep = ""))
+write.csv(list_of_links_clean, file = paste("data/gumtree_links_road",st, ".csv", sep = ""))
 
 ```
 
