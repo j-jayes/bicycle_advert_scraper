@@ -22,7 +22,6 @@ theme_set(theme_light())
 
 Webscraping the data on bicycles from bikehub classifieds. 
 
-
 ### Start with getting a list of the ads
 
 ```{r}
@@ -30,14 +29,9 @@ Webscraping the data on bicycles from bikehub classifieds.
 # url for where the pages of ads are listed for all bikes
 url <- "https://bikehub.co.za/classifieds/g/bikes"
 
-# testing
-html <- read_html(url)
-
 ```
 
 ### How many pages?
-
-
 
 ```{r}
 # get the number of pages
@@ -48,7 +42,6 @@ get_last_page <- function(html){
     html_text() %>% 
     str_remove("Page 1 of") %>% 
     parse_number()
-  
 }
 
 first_page <- read_html(url)
@@ -103,7 +96,7 @@ list_of_links_clean <- list_of_links %>%
 
 # save list of links
 st <- format(Sys.time(), "%Y-%m-%d-%I-%M-%p")
-write.csv(list_of_links_clean, file = paste("data/bikehub_links_",st, ".csv", sep = ""))
+write.csv(list_of_links_clean, file = paste("data/links/bikehub_links_",st, ".csv", sep = ""))
 
 ```
 
@@ -113,9 +106,6 @@ write.csv(list_of_links_clean, file = paste("data/bikehub_links_",st, ".csv", se
 It collects all of the fields we care about from each advert and stores them in a nice nested tibble.
 
 ```{r}
-
-html <- read_html("https://bikehub.co.za/classifieds/item/hardtail-mountain-bikes/422342/merida-big-nine-xt-editon-2018")
-
 get_ad_text <- function(ad_url){
   # store the html from the page
   html <- read_html(ad_url)
@@ -203,9 +193,6 @@ get_ad_text <- function(ad_url){
   
 }
 
-
-test <- get_ad_text("https://bikehub.co.za/classifieds/item/vintage-bikes/419967/colnago-titanio-10sp-chorus")
-
 ```
 
 
@@ -279,7 +266,7 @@ ads <- ads %>%
 ```{r}
 
 st <- format(Sys.time(), "%Y-%m-%d-%I-%M-%p")
-write_rds(ads, paste0("data/bike_hub_", st, ".rds"))
+write_rds(ads, paste0("data/ads/bike_hub_", st, ".rds"))
 
 # need to get rid of the duplicate / top ads
 ```
