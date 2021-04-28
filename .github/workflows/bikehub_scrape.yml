@@ -4,7 +4,7 @@ name: bikehub_scrape
 # Controls when the action will run.
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '0 12 * * *'
 
 jobs:
   autoscrape:
