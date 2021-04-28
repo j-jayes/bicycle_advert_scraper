@@ -25,7 +25,7 @@ jobs:
         R -e 'install.packages("glue")'
     # Run R script
     - name: Scrape
-      run: Rscript gumtree--mountain-scraper.R
+      run: Rscript gumtree-mountain-scraper.R
 
     # Add new files in data folder, commit along with other modified files, push
     - name: Commit files
