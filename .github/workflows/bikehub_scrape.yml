@@ -1,4 +1,4 @@
-# Hourly scraping
+# daily scraping for bikehub
 name: bikehub_scrape
 
 # Controls when the action will run.
