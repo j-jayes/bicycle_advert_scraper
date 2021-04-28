@@ -6,6 +6,11 @@ library(rvest)
 library(lubridate)
 library(glue)
 
+# url for where the pages of ads are listed for road bikes
+url <- "https://www.gumtree.co.za/s-mountain-bikes/v1c9800p1"
+
+tag <- "/v1c9800p"
+
 # get the number of pages
 get_last_page <- function(html){
 
@@ -57,7 +62,7 @@ list_of_links <- list_of_pages %>%
 
 # unnests the list of links for a tibble that isn't compact
 list_of_links <-list_of_links %>%
-    unnest() %>%
+    unnest(text) %>%
     mutate(ad_url = text,
            ad_number = row_number()) %>%
     select(-text)
@@ -172,8 +177,6 @@ ads_nested <- list_of_links_clean %>%
 ads <- ads_nested %>%
     unnest()
 
-ads <- read_rds("data/gumtree_ads_2020-08-20-10-21-am.rds")
-
 provinces <- c("Western Cape", "KwaZulu-Natal", "Gauteng", "Eastern Cape", "Free State", "North West", "Mpumalanga", "Limpopo", "Northern Cape")
 
 ads$province <- str_extract_all(ads$location, paste(provinces, collapse = "|")) %>%
@@ -182,6 +185,6 @@ ads$province <- str_extract_all(ads$location, paste(provinces, collapse = "|")) 
 # Save the output
 
 st <- format(Sys.time(), "%Y-%m-%d-%I-%M-%p")
-write_rds(ads, paste0("data/gumtree_ads_mountain_", st, ".rds"))
+write.csv(ads, paste0("data/ads/gumtree_ads_mountain_", st, ".csv"))
 
 

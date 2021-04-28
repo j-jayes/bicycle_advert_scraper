@@ -176,8 +176,6 @@ ads_nested <- list_of_links_clean %>%
 ads <- ads_nested %>%
     unnest()
 
-
-
 provinces <- c("Western Cape", "KwaZulu-Natal", "Gauteng", "Eastern Cape", "Free State", "North West", "Mpumalanga", "Limpopo", "Northern Cape")
 
 ads$province <- str_extract_all(ads$location, paste(provinces, collapse = "|")) %>%
@@ -186,4 +184,4 @@ ads$province <- str_extract_all(ads$location, paste(provinces, collapse = "|")) 
 # Save output
 
 st <- format(Sys.time(), "%Y-%m-%d-%I-%M-%p")
-write_rds(ads, paste0("data/ads/gumtree_ads_road_", st, ".rds"))
+write.csv(ads, paste0("data/ads/gumtree_ads_road_", st, ".csv"))
