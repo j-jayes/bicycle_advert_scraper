@@ -3,8 +3,8 @@ name: gumtree_road_scrape
 
 # Controls when the action will run.
 on:
-  push:
-    branches: main
+  schedule:
+    - cron: '0 12 * * *'
 
 jobs:
   autoscrape:
