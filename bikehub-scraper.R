@@ -161,7 +161,8 @@ ads_nested <- list_of_links_clean %>%
     mutate(text = map(ad_url, possibly(get_ad_text, "failed")))
 
 ads <- ads_nested %>%
-    unnest()
+    filter(text != "failed") %>%
+    unnest(cols = c(text))
 
 
 # joining text and info box
